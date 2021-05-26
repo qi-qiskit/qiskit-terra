@@ -69,6 +69,8 @@ class VQITE(VariationalAlgorithm, MinimumEigensolver):
         ansatz: Optional[QuantumCircuit] = None,
         initial_point: Optional[np.ndarray] = None,
         max_iter: Optional[int] = 1,
+        delta_T: Optional[float] = 0.1,
+        epsilon: Optional[float] = 0.01,
         quantum_instance: Optional[Union[QuantumInstance, BaseBackend, Backend]] = None,
     ) -> None:
         """
@@ -77,6 +79,8 @@ class VQITE(VariationalAlgorithm, MinimumEigensolver):
             ansatz: A parameterized circuit used as Ansatz for the wave function.
             initial_point: An optional initial point (i.e. initial parameter values)
             mas_iter: Maximal number of iteration to optimize the parameters
+            deltaT: Time step for each iteration
+            epsilon: convergence threshold
             quantum_instance: Quantum Instance or Backend
         """
         if ansatz is None:
@@ -92,6 +96,8 @@ class VQITE(VariationalAlgorithm, MinimumEigensolver):
         self._num_parameters = num_parameters
         self._ansatz = ansatz
         self._initial_point = initial_point
+        self._deltaT = delta_T
+        self._epsilon = epsilon
         self._quantum_instance = quantum_instance
 
         self._ret = VQEResult()
@@ -330,6 +336,7 @@ class VQITE(VariationalAlgorithm, MinimumEigensolver):
         self.construct_circuit()
 
         params = self._initial_point
+        all_params = [params]
         counter = 0
         while counter < self._max_iter:
             counter += 1
@@ -338,10 +345,30 @@ class VQITE(VariationalAlgorithm, MinimumEigensolver):
             # Compute enties of the DGL
             A = self._get_A(params)
             C = self._get_C(params)
+
+            # solve DGL
+            theta_dot = np.linalg.inv(A) @ C
+
+            # Update parameters
+            new_params = params + self._deltaT * theta_dot
+            all_params.append(new_params)
+            params = new_params
         
+        # Optimal params have been found
+        vqresult = VariationalResult()
+        vqresult.optimizer_evals = counter
+        vqresult.optimal_point = params
+        vqresult.optimal_parameters = params
+        vqresult.optimal_value = 0
 
         self._ret = VQEResult()
         self._ret.combine(vqresult)
+
+        self._ret.eigenstate = self.get_optimal_vector()
+        self._ret.eigenvalue = self.get_optimal_cost
+        self._ret.cost_function_evals =  counter       
+
+
 
         return self._ret
 
