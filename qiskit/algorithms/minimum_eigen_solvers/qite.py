@@ -43,6 +43,7 @@ from ..variational_algorithm import VariationalAlgorithm, VariationalResult
 from .minimum_eigen_solver import MinimumEigensolver, MinimumEigensolverResult
 from ..exceptions import AlgorithmError
 from .vqe import VQEResult
+from .qaoa import QAOA
 
 # Own imports
 from qiskit.circuit.library.standard_gates.rz import CRZGate, RZGate
@@ -59,15 +60,15 @@ logger = logging.getLogger(__name__)
 # pylint: disable=no-member
 
 
-class VQITE(VariationalAlgorithm, MinimumEigensolver):
+class VQITE(QAOA):
     r"""The Variational QITE algorithm
 
     """
 
     def __init__(
         self,
-        ansatz: Optional[QuantumCircuit] = None,
         initial_point: Optional[np.ndarray] = None,
+        reps: Optional[int] = 1,
         max_iter: Optional[int] = 1,
         delta_T: Optional[float] = 0.1,
         epsilon: Optional[float] = 0.01,
@@ -77,24 +78,24 @@ class VQITE(VariationalAlgorithm, MinimumEigensolver):
 
         Args:
             ansatz: A parameterized circuit used as Ansatz for the wave function.
+            reps: the integer parameter :math:`p` as specified in https://arxiv.org/abs/1411.4028,
             initial_point: An optional initial point (i.e. initial parameter values)
             mas_iter: Maximal number of iteration to optimize the parameters
             deltaT: Time step for each iteration
             epsilon: convergence threshold
             quantum_instance: Quantum Instance or Backend
         """
-        if ansatz is None:
-            ansatz = RealAmplitudes()
 
-        # set the initial point to the preferred parameters of the ansatz
-        if initial_point is None and hasattr(ansatz, "preferred_init_points"):
-            initial_point = ansatz.preferred_init_points
+        super().__init__(None,
+                            initial_point=initial_point,
+                            reps=reps,
+                            quantum_instance=quantum_instance)
 
-        num_parameters = len(initial_point)
+
+        self._num_parameters = 2 * reps
+
 
         self._max_iter = max_iter
-        self._num_parameters = num_parameters
-        self._ansatz = ansatz
         self._initial_point = initial_point
         self._deltaT = delta_T
         self._epsilon = epsilon
@@ -121,7 +122,7 @@ class VQITE(VariationalAlgorithm, MinimumEigensolver):
 
         # Copy ansatz and add additional register to evaluate 
         # and perform hadamard test
-        ansatz = deepcopy(self._ansatz)
+        ansatz = deepcopy(self.ansatz)
         qr_eval = QuantumRegister(1, 'eval')
         self._qr_eval = qr_eval
         ansatz.add_register(qr_eval)
@@ -251,7 +252,7 @@ class VQITE(VariationalAlgorithm, MinimumEigensolver):
                     circuits_C[i].append(circ_trans)
 
 
-        self._circuits_C - circuits_C
+        self._circuits_C = circuits_C
         self._coeffs = coeffs
 
 
@@ -333,7 +334,7 @@ class VQITE(VariationalAlgorithm, MinimumEigensolver):
         self._operator = op_pauli
 
         # Construct all the needed circuits
-        self.construct_circuit()
+        self.construct_circuit(None,op_pauli)
 
         params = self._initial_point
         all_params = [params]
