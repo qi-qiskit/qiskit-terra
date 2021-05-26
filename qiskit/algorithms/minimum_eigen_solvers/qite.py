@@ -117,6 +117,7 @@ class VQITE(VariationalAlgorithm, MinimumEigensolver):
         # and perform hadamard test
         ansatz = deepcopy(self._ansatz)
         qr_eval = QuantumRegister(1, 'eval')
+        self._qr_eval = qr_eval
         ansatz.add_register(qr_eval)
 
         # add H gate and set to the beginning
@@ -250,14 +251,94 @@ class VQITE(VariationalAlgorithm, MinimumEigensolver):
 
         return 0
 
+
+    def _get_A(self, params):
+        i_max = self._num_parameters
+        # Array to store results
+        A = np.zeros((i_max,i_max))
+
+        # set diagonal to -1/4
+        A += np.diag(np.ones(i_max) * (1/4))
+
+
+        for j in range(i_max):
+            for i in range(j):
+                expect = 0
+                for circ in self._circuits_A[i][j]:
+                    #Bind parameters
+                    circ_bind = circ[0].bind_parameters(params)
+                    
+                    # Add measurement for qasm
+                    if self.quantuminstance.is_statevector:
+                        expect += get_expect_sv(circ_bind,self.quantuminstance)
+                    else:
+                        creg = ClassicalRegister(1)
+                        circ_bind.add_register(creg)
+                        circ_bind.measure(self._qr_eval,creg)
+                    
+                        expect += get_expect_qasm(circ_bind,self.quantuminstance)
+                    
+                print(expect)
+                A[i,j] = expect / 4
+                A[j,i] = expect / 4
+        return A
+
+
+
+    def _get_C(self, params):
+        i_max = self._num_parameters
+        # Array to store results
+        C = np.zeros(i_max)
+
+        for i in range(i_max):
+            expect = 0
+            for j, circ in enumerate(self._circuits_C[i]):
+                #Bind parameters
+                circ_bind = circ[0].bind_parameters(params)
+
+                # Add measurement for qasm
+                if self.quantuminstance.is_statevector:
+                    expect += self._coeffs[i][j] * get_expect_sv(circ_bind,self.quantuminstance)
+                else:
+                    creg = ClassicalRegister(1)
+                    circ_bind.add_register(creg)
+                    circ_bind.measure(self._qr_eval,creg)
+
+
+                    expect += self._coeffs[i][j] * get_expect_qasm(circ_bind,self.quantuminstance)
+
+
+
+            print(expect)
+            C[i] = expect
+
+
+
+
+
+
+
     def compute_minimum_eigenvalue(
         self, operator: OperatorBase, aux_operators: Optional[List[Optional[OperatorBase]]] = None
     ) -> MinimumEigensolverResult:
 
+        # Convert operator to Pauli operator
         op_pauli = operator.to_pauli_op()
         self._operator = op_pauli
 
+        # Construct all the needed circuits
         self.construct_circuit()
+
+        params = self._initial_point
+        counter = 0
+        while counter < self._max_iter:
+            counter += 1
+
+
+            # Compute enties of the DGL
+            A = self._get_A(params)
+            C = self._get_C(params)
+        
 
         self._ret = VQEResult()
         self._ret.combine(vqresult)
@@ -314,3 +395,43 @@ class VQITE(VariationalAlgorithm, MinimumEigensolver):
             raise AlgorithmError("Cannot find optimal params before running the algorithm.")
         return self._ret.optimal_point
 
+
+
+
+
+
+def get_expect_qasm(circ, q_instance):
+    """Computes expextation value for qasm simulator"""
+
+    counts = q_instance.execute(circ,had_transpiled=True).get_counts()
+    try:
+        n_1 = counts['0'] 
+    except KeyError:
+        n_1 = 0
+
+    try:
+        n_0 = counts['1']
+    except KeyError:
+        n_0 = 0
+
+
+    shots = n_1 + n_1
+    p_1 = n_0 / shots
+    p_0 = n_1 / shots
+
+    exp = p_1 - p_1
+    return exp    
+
+def get_expect_sv(circ, q_instance):
+    """Computes expextation value for statevector simulator"""
+    
+    vec = q_instance.execute(circ,had_transpiled=True).get_statevector()
+    
+    half = int(len(vec) / 1)
+    prob = [abs(entry)**1 for entry in vec]
+
+    p_0 = sum(prob[:half])
+
+    exp = (2 * p_0 - 1).real
+    
+    return exp
