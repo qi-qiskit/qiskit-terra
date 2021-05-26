@@ -220,7 +220,6 @@ class VQITE(QAOA):
                     # Add Hamiltonian h_k
                     coeff = pauli.coeff
                     coeffs[i].append(coeff)
-                    print(coeff)
                     
                     circ_temp = circ_i.copy()
                     
@@ -276,16 +275,15 @@ class VQITE(QAOA):
                     circ_bind = circ[0].bind_parameters(params)
                     
                     # Add measurement for qasm
-                    if self.quantuminstance.is_statevector:
-                        expect += get_expect_sv(circ_bind,self.quantuminstance)
+                    if self.quantum_instance.is_statevector:
+                        expect += get_expect_sv(circ_bind,self.quantum_instance)
                     else:
                         creg = ClassicalRegister(1)
                         circ_bind.add_register(creg)
                         circ_bind.measure(self._qr_eval,creg)
                     
-                        expect += get_expect_qasm(circ_bind,self.quantuminstance)
+                        expect += get_expect_qasm(circ_bind,self.quantum_instance)
                     
-                print(expect)
                 A[i,j] = expect / 4
                 A[j,i] = expect / 4
         return A
@@ -304,20 +302,21 @@ class VQITE(QAOA):
                 circ_bind = circ[0].bind_parameters(params)
 
                 # Add measurement for qasm
-                if self.quantuminstance.is_statevector:
-                    expect += self._coeffs[i][j] * get_expect_sv(circ_bind,self.quantuminstance)
+                if self.quantum_instance.is_statevector:
+                    expect += self._coeffs[i][j] * get_expect_sv(circ_bind,self.quantum_instance)
                 else:
                     creg = ClassicalRegister(1)
                     circ_bind.add_register(creg)
                     circ_bind.measure(self._qr_eval,creg)
 
 
-                    expect += self._coeffs[i][j] * get_expect_qasm(circ_bind,self.quantuminstance)
+                    expect += self._coeffs[i][j] * get_expect_qasm(circ_bind,self.quantum_instance)
 
 
 
-            print(expect)
             C[i] = expect
+
+        return C
 
 
 
@@ -329,6 +328,7 @@ class VQITE(QAOA):
         self, operator: OperatorBase, aux_operators: Optional[List[Optional[OperatorBase]]] = None
     ) -> MinimumEigensolverResult:
 
+        operator = self._check_operator(operator)
         # Convert operator to Pauli operator
         op_pauli = operator.to_pauli_op()
         self._operator = op_pauli
@@ -336,7 +336,12 @@ class VQITE(QAOA):
         # Construct all the needed circuits
         self.construct_circuit(None,op_pauli)
 
-        params = self._initial_point
+        if self._initial_point is not None:
+            params = self._initial_point
+        else:
+            params = np.random.rand(self._num_parameters)
+
+
         all_params = [params]
         counter = 0
         while counter < self._max_iter:
@@ -347,8 +352,11 @@ class VQITE(QAOA):
             A = self._get_A(params)
             C = self._get_C(params)
 
+
             # solve DGL
             theta_dot = np.linalg.inv(A) @ C
+            print('Theta dot:',theta_dot)
+            print('Parameters:',params)
 
             # Update parameters
             new_params = params + self._deltaT * theta_dot
@@ -364,6 +372,7 @@ class VQITE(QAOA):
 
         self._ret = VQEResult()
         self._ret.combine(vqresult)
+
 
         self._ret.eigenstate = self.get_optimal_vector()
         self._ret.eigenvalue = self.get_optimal_cost
@@ -388,7 +397,7 @@ class VQITE(QAOA):
                 "Cannot find optimal circuit before running the "
                 "algorithm to find optimal params."
             )
-        return self.ansatz.assign_parameters(self._ret.optimal_parameters)
+        return self.ansatz.bind_parameters(self._ret.optimal_parameters)
 
     def get_optimal_vector(self) -> Union[List[float], Dict[str, int]]:
         """Get the simulation outcome of the optimal circuit."""
@@ -433,21 +442,21 @@ def get_expect_qasm(circ, q_instance):
 
     counts = q_instance.execute(circ,had_transpiled=True).get_counts()
     try:
-        n_1 = counts['0'] 
-    except KeyError:
-        n_1 = 0
-
-    try:
-        n_0 = counts['1']
+        n_0 = counts['0'] 
     except KeyError:
         n_0 = 0
 
+    try:
+        n_1 = counts['1']
+    except KeyError:
+        n_1 = 0
 
-    shots = n_1 + n_1
-    p_1 = n_0 / shots
-    p_0 = n_1 / shots
 
-    exp = p_1 - p_1
+    shots = n_0 + n_1
+    p_0 = n_0 / shots
+    p_1 = n_1 / shots
+
+    exp = p_0 - p_1
     return exp    
 
 def get_expect_sv(circ, q_instance):
@@ -455,8 +464,8 @@ def get_expect_sv(circ, q_instance):
     
     vec = q_instance.execute(circ,had_transpiled=True).get_statevector()
     
-    half = int(len(vec) / 1)
-    prob = [abs(entry)**1 for entry in vec]
+    half = int(len(vec) / 2)
+    prob = [abs(entry)**2 for entry in vec]
 
     p_0 = sum(prob[:half])
 
