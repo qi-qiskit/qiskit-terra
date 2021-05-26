@@ -14,11 +14,13 @@
 
 from .vqe import VQE, VQEResult
 from .qaoa import QAOA
+from .qite import VQITE
 from .numpy_minimum_eigen_solver import NumPyMinimumEigensolver
 from .minimum_eigen_solver import MinimumEigensolver, MinimumEigensolverResult
 
 __all__ = [
     "VQE",
+    "VQITE",
     "VQEResult",
     "QAOA",
     "NumPyMinimumEigensolver",

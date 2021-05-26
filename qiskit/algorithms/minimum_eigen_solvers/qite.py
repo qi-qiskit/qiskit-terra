@@ -99,30 +99,9 @@ class VQITE(VariationalAlgorithm, MinimumEigensolver):
         Returns:
             A list of the circuits used to compute the expectation value.
         """
-        expect_op = self.construct_expectation(parameter, operator).to_circuit_op()
-
         circuits = []
 
-        # recursively extract circuits
-        def extract_circuits(op):
-            if isinstance(op, CircuitStateFn):
-                circuits.append(op.primitive)
-            elif isinstance(op, ListOp):
-                for op_i in op.oplist:
-                    extract_circuits(op_i)
-
-        extract_circuits(expect_op)
-
         return circuits
-
-    def _check_operator(self, operator: OperatorBase) -> OperatorBase:
-        """set operator"""
-        self._expect_op = None
-        self._check_operator_varform(operator)
-        # Expectation was not passed by user, try to create one
-        if not self._user_valid_expectation:
-            self._try_set_expectation_value_from_factory(operator)
-        return operator
 
     def compute_minimum_eigenvalue(
         self, operator: OperatorBase, aux_operators: Optional[List[Optional[OperatorBase]]] = None
@@ -134,56 +113,6 @@ class VQITE(VariationalAlgorithm, MinimumEigensolver):
         self._ret.combine(vqresult)
 
         return self._ret
-
-    def _energy_evaluation(
-        self, parameters: Union[List[float], np.ndarray]
-    ) -> Union[float, List[float]]:
-        """Evaluate energy at given parameters for the ansatz.
-
-        This is the objective function to be passed to the optimizer that is used for evaluation.
-
-        Args:
-            parameters: The parameters for the ansatz.
-
-        Returns:
-            Energy of the hamiltonian of each parameter.
-
-
-        Raises:
-            RuntimeError: If the ansatz has no parameters.
-        """
-        num_parameters = self.ansatz.num_parameters
-        if self._ansatz.num_parameters == 0:
-            raise RuntimeError("The ansatz cannot have 0 parameters.")
-
-        parameter_sets = np.reshape(parameters, (-1, num_parameters))
-        # Create dict associating each parameter with the lists of parameterization values for it
-        param_bindings = dict(
-            zip(self._ansatz_params, parameter_sets.transpose().tolist())
-        )  # type: Dict
-
-        start_time = time()
-        sampled_expect_op = self._circuit_sampler.convert(self._expect_op, params=param_bindings)
-        means = np.real(sampled_expect_op.eval())
-
-        if self._callback is not None:
-            variance = np.real(self._expectation.compute_variance(sampled_expect_op))
-            estimator_error = np.sqrt(variance / self.quantum_instance.run_config.shots)
-            for i, param_set in enumerate(parameter_sets):
-                self._eval_count += 1
-                self._callback(self._eval_count, param_set, means[i], estimator_error[i])
-        else:
-            self._eval_count += len(means)
-
-        end_time = time()
-        logger.info(
-            "Energy evaluation returned %s - %.5f (ms), eval count: %s",
-            means,
-            (end_time - start_time) * 1000,
-            self._eval_count,
-        )
-
-        return means if len(means) > 1 else means[0]
 
     def get_optimal_cost(self) -> float:
         """Get the minimal cost or energy found by the VQE."""
